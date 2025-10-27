@@ -70,6 +70,14 @@ typedef bool boolean;
 
 #else
 
+// Arduino.h で定義された true, false の定義を無効化
+#ifdef false
+    #undef false
+#endif
+#ifdef true
+    #undef true
+#endif
+
 typedef enum 
 {
     false	= 0,
