@@ -10,7 +10,7 @@ void M_FindResponseFile(void);
 void D_DoomMain (void);
 
 
-void doomgeneric_Create(int argc, char **argv)
+void doomgeneric_Create(int argc, const char **argv)
 {
 	// save arguments
     myargc = argc;
