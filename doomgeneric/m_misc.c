@@ -48,6 +48,8 @@
 #include "w_wad.h"
 #include "z_zone.h"
 
+#include <spresense_sd.h>
+
 //
 // Create a directory
 //
@@ -65,6 +67,7 @@ void M_MakeDirectory(char *path)
 
 boolean M_FileExists(char *filename)
 {
+#if 0
     FILE *fstream;
 
     fstream = fopen(filename, "r");
@@ -81,6 +84,8 @@ boolean M_FileExists(char *filename)
 
         return errno == EISDIR;
     }
+#endif
+    return spresense_sd_exists(filename);
 }
 
 //
