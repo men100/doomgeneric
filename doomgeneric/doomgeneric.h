@@ -13,7 +13,11 @@
 #endif  // DOOMGENERIC_RESY
 
 
-#ifdef CMAP256
+#ifdef USE_RGB565
+
+typedef uint16_t pixel_t;
+
+#elif defined(CMAP256)
 
 typedef uint8_t pixel_t;
 
@@ -21,7 +25,7 @@ typedef uint8_t pixel_t;
 
 typedef uint32_t pixel_t;
 
-#endif  // CMAP256
+#endif  // USE_RGB565
 
 
 extern pixel_t* DG_ScreenBuffer;
