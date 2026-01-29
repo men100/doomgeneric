@@ -93,6 +93,17 @@ void I_Tactile(int on, int off, int total)
 // works.
 
 #include <arch/chip/gnssram.h>
+
+// Secondary Zone in Main RAM (512KB)
+#define SECONDARY_RAM_SIZE (512 * 1024)
+static byte doom_secondary_zone[SECONDARY_RAM_SIZE];
+
+void I_GetSecondaryZone(byte **ptr, int *size)
+{
+    *ptr = doom_secondary_zone;
+    *size = SECONDARY_RAM_SIZE;
+}
+
 static byte *AutoAllocMemory(int *size, int default_ram, int min_ram)
 {
     byte *zonemem;

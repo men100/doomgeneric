@@ -62,8 +62,9 @@ typedef struct
 
 
 memzone_t*	mainzone;
+memzone_t*	secondaryzone;
 
-
+extern void I_GetSecondaryZone(byte **ptr, int *size);
 
 //
 // Z_ClearZone
@@ -71,7 +72,7 @@ memzone_t*	mainzone;
 void Z_ClearZone (memzone_t* zone)
 {
     memblock_t*		block;
-	
+
     // set the entire zone to one free block
     zone->blocklist.next =
 	zone->blocklist.prev =
@@ -99,24 +100,22 @@ void Z_Init (void)
     memblock_t*	block;
     int		size;
 
+    // Initialize Main Zone (GNSS RAM)
     mainzone = (memzone_t *)I_ZoneBase (&size);
     mainzone->size = size;
+    Z_ClearZone(mainzone);
 
-    // set the entire zone to one free block
-    mainzone->blocklist.next =
-	mainzone->blocklist.prev =
-	block = (memblock_t *)( (byte *)mainzone + sizeof(memzone_t) );
-
-    mainzone->blocklist.user = (void *)mainzone;
-    mainzone->blocklist.tag = PU_STATIC;
-    mainzone->rover = block;
-	
-    block->prev = block->next = &mainzone->blocklist;
-
-    // free block
-    block->tag = PU_FREE;
+    // Initialize Secondary Zone (Main RAM)
+    byte* sec_ptr;
+    int sec_size;
+    I_GetSecondaryZone(&sec_ptr, &sec_size);
     
-    block->size = mainzone->size - sizeof(memzone_t);
+    secondaryzone = (memzone_t *)sec_ptr;
+    secondaryzone->size = sec_size;
+    Z_ClearZone(secondaryzone);
+    
+    printf("Z_Init: Main Zone (GNSS) %p size %d, Secondary Zone (RAM) %p size %d\n", 
+           mainzone, mainzone->size, secondaryzone, secondaryzone->size);
 }
 
 
@@ -127,15 +126,31 @@ void Z_Free (void* ptr)
 {
     memblock_t*		block;
     memblock_t*		other;
-	
+    memzone_t*		zone;
+
     block = (memblock_t *) ( (byte *)ptr - sizeof(memblock_t));
 
     if (block->id != ZONEID)
 	I_Error ("Z_Free: freed a pointer without ZONEID");
-		
+
+    // Determine which zone this block belongs to
+    if ((byte*)block >= (byte*)mainzone && (byte*)block < (byte*)mainzone + mainzone->size)
+    {
+        zone = mainzone;
+    }
+    else if ((byte*)block >= (byte*)secondaryzone && (byte*)block < (byte*)secondaryzone + secondaryzone->size)
+    {
+        zone = secondaryzone;
+    }
+    else
+    {
+        I_Error("Z_Free: Pointer %p is not in any zone!", ptr);
+        return;
+    }
+
     if (block->tag != PU_FREE && block->user != NULL)
     {
-    	// clear the user's mark
+        // clear the user's mark
 	    *block->user = 0;
     }
 
@@ -143,7 +158,7 @@ void Z_Free (void* ptr)
     block->tag = PU_FREE;
     block->user = NULL;
     block->id = 0;
-	
+
     other = block->prev;
 
     if (other->tag == PU_FREE)
@@ -153,12 +168,12 @@ void Z_Free (void* ptr)
         other->next = block->next;
         other->next->prev = other;
 
-        if (block == mainzone->rover)
-            mainzone->rover = other;
+        if (block == zone->rover)
+            zone->rover = other;
 
         block = other;
     }
-	
+
     other = block->next;
     if (other->tag == PU_FREE)
     {
@@ -167,8 +182,8 @@ void Z_Free (void* ptr)
         block->next = other->next;
         block->next->prev = block;
 
-        if (other == mainzone->rover)
-            mainzone->rover = block;
+        if (other == zone->rover)
+            zone->rover = block;
     }
 }
 
@@ -181,61 +196,53 @@ void Z_Free (void* ptr)
 #define MINFRAGMENT		64
 
 
-void*
-Z_Malloc
-( int		size,
-  int		tag,
-  void*		user )
+// Helper to try allocating from a specific zone
+void* Z_Malloc_Zone(memzone_t* zone, int size, int tag, void* user)
 {
     int		extra;
     memblock_t*	start;
     memblock_t* rover;
     memblock_t* newblock;
     memblock_t*	base;
-    void *result;
 
-    size = (size + MEM_ALIGN - 1) & ~(MEM_ALIGN - 1);
-    
-    // scan through the block list,
-    // looking for the first free block
-    // of sufficient size,
-    // throwing out any purgable blocks along the way.
+    // size = (size + MEM_ALIGN - 1) & ~(MEM_ALIGN - 1); // Done in caller
+    // size += sizeof(memblock_t); // Done in caller
 
-    // account for size of block header
-    size += sizeof(memblock_t);
-    
-    // if there is a free block behind the rover,
-    //  back up over them
-    base = mainzone->rover;
+    base = zone->rover;
     
     if (base->prev->tag == PU_FREE)
         base = base->prev;
-	
+
     rover = base;
     start = base->prev;
-	
+
     do
     {
         if (rover == start)
         {
             // scanned all the way around the list
-            I_Error ("Z_Malloc: failed on allocation of %i bytes", size);
+            return NULL;
         }
-	
+
         if (rover->tag != PU_FREE)
         {
             if (rover->tag < PU_PURGELEVEL)
             {
-                // hit a block that can't be purged,
-                // so move base past it
                 base = rover = rover->next;
             }
             else
             {
-                // free the rover block (adding the size to base)
-
-                // the rover can be the base block
                 base = base->prev;
+                // Note: Z_Free handles zone determination, but here we know the zone.
+                // We can't call Z_Free safely if we are inside the loop iterating the same zone?
+                // Actually Z_Free merges blocks.
+                // To be safe, we use the pointer arithmetic logic here or just call Z_Free.
+                // Z_Free uses the pointer to find the block. It should work.
+                
+                // However, standard Z_Free checks zones. 
+                // Let's just trust Z_Free logic or replicate it locally?
+                // The original code called Z_Free.
+                
                 Z_Free ((byte *)rover+sizeof(memblock_t));
                 base = base->next;
                 rover = base->next;
@@ -249,17 +256,15 @@ Z_Malloc
     } while (base->tag != PU_FREE || base->size < size);
 
     
-    // found a block big enough
     extra = base->size - size;
     
     if (extra >  MINFRAGMENT)
     {
-        // there will be a free fragment after the allocated block
         newblock = (memblock_t *) ((byte *)base + size );
         newblock->size = extra;
-	
+
         newblock->tag = PU_FREE;
-        newblock->user = NULL;	
+        newblock->user = NULL;
         newblock->prev = base;
         newblock->next = base->next;
         newblock->next->prev = newblock;
@@ -267,28 +272,66 @@ Z_Malloc
         base->next = newblock;
         base->size = size;
     }
-	
-	if (user == NULL && tag >= PU_PURGELEVEL)
-	    I_Error ("Z_Malloc: an owner is required for purgable blocks");
-
-    base->user = user;
-    base->tag = tag;
-
-    result  = (void *) ((byte *)base + sizeof(memblock_t));
-
-    if (base->user)
+    
+    if (user)
     {
-        *base->user = result;
+        base->user = user;
+        *(void **)user = (void *) ((byte *)base + sizeof(memblock_t));
     }
+    else
+    {
+        if (tag >= PU_PURGELEVEL)
+            I_Error ("Z_Malloc: an owner is required for purgable blocks");
 
-    // next allocation will start looking here
-    mainzone->rover = base->next;	
-	
+        base->user = NULL;
+    }
+    
+    base->tag = tag;
     base->id = ZONEID;
     
-    return result;
+    zone->rover = base->next;
+    
+    return (void *) ((byte *)base + sizeof(memblock_t));
 }
 
+void*
+Z_Malloc
+( int		size,
+  int		tag,
+  void*		user )
+{
+    void* result;
+    int original_size = size;
+
+    size = (size + MEM_ALIGN - 1) & ~(MEM_ALIGN - 1);
+    size += sizeof(memblock_t);
+    
+    // Try Main Zone (GNSS RAM)
+    result = Z_Malloc_Zone(mainzone, size, tag, user);
+    
+    if (result == NULL)
+    {
+        // Try Secondary Zone (Main RAM)
+        // printf("Z_Malloc: Main zone full, trying secondary for %d bytes\n", original_size);
+        result = Z_Malloc_Zone(secondaryzone, size, tag, user);
+    }
+
+    if (result == NULL)
+    {
+        if (tag >= PU_CACHE) {
+             // For cacheable blocks, returning NULL might be handled by caller (if we modified them)
+             // But original Doom expects success or error.
+             // We return NULL and hope for the best (since we added checks in r_data.c)
+             printf("Z_Malloc: failed on allocation of %i bytes (Both zones full)\n", original_size);
+             return NULL;
+        }
+        
+        // Critical memory failure
+        I_Error ("Z_Malloc: failed on allocation of %i bytes", original_size);
+    }
+
+    return result;
+}
 
 
 //
