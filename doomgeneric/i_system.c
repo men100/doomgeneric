@@ -105,8 +105,8 @@ void I_GetSecondaryZone(byte **ptr, int *size)
     }
 }
 
-// Primary Zone in Main RAM (512KB)
-#define PRIMARY_RAM_SIZE (512 * 1000)
+// Primary Zone in Main RAM (576KB)
+#define PRIMARY_RAM_SIZE (576 * 1000)
 static byte doom_primary_zone[PRIMARY_RAM_SIZE];
 static byte *AutoAllocMemory(int *size, int default_ram, int min_ram)
 {
