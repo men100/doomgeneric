@@ -100,12 +100,12 @@ void Z_Init (void)
     memblock_t*	block;
     int		size;
 
-    // Initialize Main Zone (GNSS RAM)
+    // Initialize Main Zone (Main RAM)
     mainzone = (memzone_t *)I_ZoneBase (&size);
     mainzone->size = size;
     Z_ClearZone(mainzone);
 
-    // Initialize Secondary Zone (Main RAM)
+    // Initialize Secondary Zone (GNSS RAM)
     byte* sec_ptr;
     int sec_size;
     I_GetSecondaryZone(&sec_ptr, &sec_size);
@@ -133,7 +133,7 @@ void Z_Free (void* ptr)
     if (block->id != ZONEID)
 	I_Error ("Z_Free: freed a pointer without ZONEID");
 
-    // Determine which zone this block belongs to
+    // ブロックがどちらの zone に属するかを判定
     if ((byte*)block >= (byte*)mainzone && (byte*)block < (byte*)mainzone + mainzone->size)
     {
         zone = mainzone;
@@ -196,7 +196,7 @@ void Z_Free (void* ptr)
 #define MINFRAGMENT		64
 
 
-// Helper to try allocating from a specific zone
+// 特定の zone から allocate を試行する helper 関数
 void* Z_Malloc_Zone(memzone_t* zone, int size, int tag, void* user)
 {
     int		extra;
@@ -205,8 +205,9 @@ void* Z_Malloc_Zone(memzone_t* zone, int size, int tag, void* user)
     memblock_t* newblock;
     memblock_t*	base;
 
-    // size = (size + MEM_ALIGN - 1) & ~(MEM_ALIGN - 1); // Done in caller
-    // size += sizeof(memblock_t); // Done in caller
+    // 呼び手 (Z_Malloc) で実施済
+    // size = (size + MEM_ALIGN - 1) & ~(MEM_ALIGN - 1);
+    // size += sizeof(memblock_t);
 
     base = zone->rover;
     
@@ -220,7 +221,7 @@ void* Z_Malloc_Zone(memzone_t* zone, int size, int tag, void* user)
     {
         if (rover == start)
         {
-            // scanned all the way around the list
+            // リストを最後までスキャンした
             return NULL;
         }
 
@@ -233,16 +234,6 @@ void* Z_Malloc_Zone(memzone_t* zone, int size, int tag, void* user)
             else
             {
                 base = base->prev;
-                // Note: Z_Free handles zone determination, but here we know the zone.
-                // We can't call Z_Free safely if we are inside the loop iterating the same zone?
-                // Actually Z_Free merges blocks.
-                // To be safe, we use the pointer arithmetic logic here or just call Z_Free.
-                // Z_Free uses the pointer to find the block. It should work.
-                
-                // However, standard Z_Free checks zones. 
-                // Let's just trust Z_Free logic or replicate it locally?
-                // The original code called Z_Free.
-                
                 Z_Free ((byte *)rover+sizeof(memblock_t));
                 base = base->next;
                 rover = base->next;
@@ -306,12 +297,12 @@ Z_Malloc
     size = (size + MEM_ALIGN - 1) & ~(MEM_ALIGN - 1);
     size += sizeof(memblock_t);
     
-    // Try Main Zone (GNSS RAM)
+    // Try Main Zone (Main RAM)
     result = Z_Malloc_Zone(mainzone, size, tag, user);
     
     if (result == NULL)
     {
-        // Try Secondary Zone (Main RAM)
+        // Try Secondary Zone (GNSS RAM)
         // printf("Z_Malloc: Main zone full, trying secondary for %d bytes\n", original_size);
         result = Z_Malloc_Zone(secondaryzone, size, tag, user);
     }
@@ -319,14 +310,12 @@ Z_Malloc
     if (result == NULL)
     {
         if (tag >= PU_CACHE) {
-             // For cacheable blocks, returning NULL might be handled by caller (if we modified them)
-             // But original Doom expects success or error.
-             // We return NULL and hope for the best (since we added checks in r_data.c)
-             printf("Z_Malloc: failed on allocation of %i bytes (Both zones full)\n", original_size);
-             return NULL;
+            // キャッシュ可能なブロックなので、NULL を返しても救える可能性がある
+            printf("Z_Malloc: failed on allocation of %i bytes (Both zones full)\n", original_size);
+            return NULL;
         }
         
-        // Critical memory failure
+        // こちらは救えない
         I_Error ("Z_Malloc: failed on allocation of %i bytes", original_size);
     }
 

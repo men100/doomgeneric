@@ -93,17 +93,21 @@ void I_Tactile(int on, int off, int total)
 // works.
 
 #include <arch/chip/gnssram.h>
-
-// Secondary Zone in Main RAM (512KB)
-#define SECONDARY_RAM_SIZE (512 * 1024)
-static byte doom_secondary_zone[SECONDARY_RAM_SIZE];
-
 void I_GetSecondaryZone(byte **ptr, int *size)
 {
-    *ptr = doom_secondary_zone;
-    *size = SECONDARY_RAM_SIZE;
+    // GNSS RAM は 640KB あるが、管理領域があるからか、このサイズ以上は確保できない
+    *size = 654988;
+    *ptr = up_gnssram_malloc(*size);
+
+    if (ptr == NULL)
+    {
+        I_Error("I_GetSecondaryZone: Unable to allocate %i Bytes of RAM for zone", *size);
+    }
 }
 
+// Primary Zone in Main RAM (512KB)
+#define PRIMARY_RAM_SIZE (512 * 1000)
+static byte doom_primary_zone[PRIMARY_RAM_SIZE];
 static byte *AutoAllocMemory(int *size, int default_ram, int min_ram)
 {
     byte *zonemem;
@@ -113,16 +117,15 @@ static byte *AutoAllocMemory(int *size, int default_ram, int min_ram)
     // If we used the -mb command line parameter, only the parameter
     // provided is accepted.
 
-    // GNSS RAM は 640KB あるようだが、このサイズ以上は確保できない模様 (失敗する)
-    *size = 654988;
+    *size = PRIMARY_RAM_SIZE;
 
-    // zonemem は GNSS RAM に格納
-    zonemem = up_gnssram_malloc(*size);
+    // zonemem は Main RAM に格納
+    zonemem = doom_primary_zone;
     printf("AutoAllocMemory: zonemem=%p, size=%i\n", zonemem, *size);
 
     if (zonemem == NULL)
     {
-        I_Error("Unable to allocate %i B of RAM for zone", *size);
+        I_Error("AutoAllocMemory: Unable to allocate %i Bytes of RAM for zone", *size);
     }
 
     return zonemem;
