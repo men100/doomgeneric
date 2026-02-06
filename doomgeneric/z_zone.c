@@ -114,7 +114,7 @@ void Z_Init (void)
     secondaryzone->size = sec_size;
     Z_ClearZone(secondaryzone);
     
-    printf("Z_Init: Main Zone (GNSS) %p size %d, Secondary Zone (RAM) %p size %d\n", 
+    printf("Z_Init: Main Zone (Main RAM) %p size %d, Secondary Zone (GNSS) %p size %d\n", 
            mainzone, mainzone->size, secondaryzone, secondaryzone->size);
 }
 
@@ -324,18 +324,15 @@ Z_Malloc
 
 
 //
-// Z_FreeTags
+// Z_FreeTags_Zone
 //
-void
-Z_FreeTags
-( int		lowtag,
-  int		hightag )
+void Z_FreeTags_Zone(memzone_t* zone, int lowtag, int hightag)
 {
     memblock_t*	block;
     memblock_t*	next;
 	
-    for (block = mainzone->blocklist.next ;
-	 block != &mainzone->blocklist ;
+    for (block = zone->blocklist.next ;
+	 block != &zone->blocklist ;
 	 block = next)
     {
 	// get link before freeing
@@ -350,32 +347,37 @@ Z_FreeTags
     }
 }
 
-
-
-//
-// Z_DumpHeap
-// Note: TFileDumpHeap( stdout ) ?
-//
 void
-Z_DumpHeap
-( int		lowtag,
-  int		hightag )
+Z_FreeTags
+(
+  int           lowtag,
+  int           hightag )
+{
+    Z_FreeTags_Zone(mainzone, lowtag, hightag);
+    Z_FreeTags_Zone(secondaryzone, lowtag, hightag);
+}
+
+
+//
+// Z_DumpHeap_Zone
+//
+void Z_DumpHeap_Zone(memzone_t* zone, int lowtag, int hightag)
 {
     memblock_t*	block;
 	
     printf ("zone size: %i  location: %p\n",
-	    mainzone->size,mainzone);
+	    zone->size,zone);
     
     printf ("tag range: %i to %i\n",
 	    lowtag, hightag);
 	
-    for (block = mainzone->blocklist.next ; ; block = block->next)
+    for (block = zone->blocklist.next ; ; block = block->next)
     {
 	if (block->tag >= lowtag && block->tag <= hightag)
 	    printf ("block:%p    size:%7i    user:%p    tag:%3i\n",
 		    block, block->size, block->user, block->tag);
 		
-	if (block->next == &mainzone->blocklist)
+	if (block->next == &zone->blocklist)
 	{
 	    // all blocks have been hit
 	    break;
@@ -390,6 +392,16 @@ Z_DumpHeap
 	if (block->tag == PU_FREE && block->next->tag == PU_FREE)
 	    printf ("ERROR: two consecutive free blocks\n");
     }
+}
+
+void
+Z_DumpHeap
+(
+  int           lowtag,
+  int           hightag )
+{
+    Z_DumpHeap_Zone(mainzone, lowtag, hightag);
+    Z_DumpHeap_Zone(secondaryzone, lowtag, hightag);
 }
 
 
@@ -427,15 +439,15 @@ void Z_FileDumpHeap (FILE* f)
 
 
 //
-// Z_CheckHeap
+// Z_CheckHeap_Zone
 //
-void Z_CheckHeap (void)
+void Z_CheckHeap_Zone(memzone_t* zone)
 {
     memblock_t*	block;
 	
-    for (block = mainzone->blocklist.next ; ; block = block->next)
+    for (block = zone->blocklist.next ; ; block = block->next)
     {
-	if (block->next == &mainzone->blocklist)
+	if (block->next == &zone->blocklist)
 	{
 	    // all blocks have been hit
 	    break;
@@ -452,7 +464,11 @@ void Z_CheckHeap (void)
     }
 }
 
-
+void Z_CheckHeap (void)
+{
+    Z_CheckHeap_Zone(mainzone);
+    Z_CheckHeap_Zone(secondaryzone);
+}
 
 
 //
@@ -495,15 +511,15 @@ void Z_ChangeUser(void *ptr, void **user)
 //
 // Z_FreeMemory
 //
-int Z_FreeMemory (void)
+int Z_FreeMemory_Zone(memzone_t* zone)
 {
     memblock_t*		block;
     int			free;
 	
     free = 0;
     
-    for (block = mainzone->blocklist.next ;
-         block != &mainzone->blocklist;
+    for (block = zone->blocklist.next ;
+         block != &zone->blocklist;
          block = block->next)
     {
         if (block->tag == PU_FREE || block->tag >= PU_PURGELEVEL)
@@ -513,8 +529,18 @@ int Z_FreeMemory (void)
     return free;
 }
 
-unsigned int Z_ZoneSize(void)
+int Z_FreeMemory (void)
 {
-    return mainzone->size;
+    return Z_FreeMemory_Zone(mainzone) + Z_FreeMemory_Zone(secondaryzone);
 }
 
+void Z_GetFreeMemory(int* main_free, int* sec_free)
+{
+    *main_free = Z_FreeMemory_Zone(mainzone);
+    *sec_free = Z_FreeMemory_Zone(secondaryzone);
+}
+
+unsigned int Z_ZoneSize(void)
+{
+    return mainzone->size + secondaryzone->size;
+}
